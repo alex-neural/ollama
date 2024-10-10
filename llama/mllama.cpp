@@ -185,8 +185,8 @@ struct mllama_vision_model {
     struct ggml_tensor *post_ln_w;
     struct ggml_tensor *post_ln_b;
 
-    struct ggml_tensor *mm_0_w = nullptr;
-    struct ggml_tensor *mm_0_b = nullptr;
+    struct ggml_tensor *mm_0_w;
+    struct ggml_tensor *mm_0_b;
 };
 
 struct mllama_ctx {
@@ -372,10 +372,10 @@ static ggml_cgraph *mllama_image_build_graph(mllama_ctx *ctx, const mllama_image
         ggml_set_input(embeddings);
         for (int i = 0; i < num_tiles; ++i) {
             // repeat class embeddings for each tile
-            embeddings = ggml_acc(ctx0, embeddings, model.class_embedding, embeddings->nb[1], embeddings->nb[2], embeddings->nb[3], i * embeddings->nb[2]);
+            embeddings = ggml_acc_inplace(ctx0, embeddings, model.class_embedding, embeddings->nb[1], embeddings->nb[2], embeddings->nb[3], i * embeddings->nb[2]);
         }
 
-        embeddings = ggml_acc(ctx0, embeddings, inp, embeddings->nb[1], embeddings->nb[2], embeddings->nb[3], model.class_embedding->nb[1]);
+        embeddings = ggml_acc_inplace(ctx0, embeddings, inp, embeddings->nb[1], embeddings->nb[2], embeddings->nb[3], model.class_embedding->nb[1]);
     }
 
     struct ggml_tensor *positions = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, num_positions);
@@ -416,21 +416,12 @@ static ggml_cgraph *mllama_image_build_graph(mllama_ctx *ctx, const mllama_image
     embeddings = ggml_pad(ctx0, embeddings, 0, num_padding_patches, 0, 0);
     embeddings = ggml_view_3d(ctx0, embeddings, embeddings->ne[0], embeddings->ne[1] * embeddings->ne[2], batch_size, embeddings->nb[1], embeddings->nb[2] * embeddings->ne[3], 0);
 
+    std::vector<struct ggml_tensor *> intermediate_embeddings;
+
     // encoder
-    auto intermediate_layers = hparams.intermediate_layers;
-    const auto &num_intermediate_layers = std::count(intermediate_layers.begin(), intermediate_layers.end(), true);
-
-    struct ggml_tensor *intermediate_embd = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, num_intermediate_layers, hidden_size, (num_positions + num_padding_patches) * num_tiles);
-    ggml_set_name(intermediate_embd, "intermediate_embeddings");
-    ggml_set_input(intermediate_embd);
-
-    for (size_t il = 0, s = 0; il < model.layers.size(); il++) {
-        if (intermediate_layers[il]) {
-            intermediate_embd = ggml_acc(
-                ctx0, intermediate_embd,
-                ggml_reshape_3d(ctx0, embeddings, 1, embeddings->ne[0], embeddings->ne[1]),
-                intermediate_embd->nb[1], intermediate_embd->nb[2], intermediate_embd->nb[3], s * embeddings->nb[0]);
-            s++;
+    for (size_t il = 0; il < model.layers.size(); il++) {
+        if (hparams.intermediate_layers[il]) {
+            intermediate_embeddings.push_back(embeddings);
         }
 
         embeddings = mllama_image_build_encoder_layer(
@@ -471,14 +462,17 @@ static ggml_cgraph *mllama_image_build_graph(mllama_ctx *ctx, const mllama_image
             hparams.eps, hidden_size, batch_size, n_head, d_head);
     }
 
+    struct ggml_tensor *stacked_embeddings = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, 0, hidden_size, (num_positions + num_padding_patches) * num_tiles);
+    for (size_t i = 0; i < intermediate_embeddings.size(); ++i) {
+        stacked_embeddings = ggml_concat(ctx0, stacked_embeddings, ggml_reshape_3d(ctx0, intermediate_embeddings[i], 1, intermediate_embeddings[i]->ne[0], intermediate_embeddings[i]->ne[1]), 0);
+    }
+
+    stacked_embeddings = ggml_reshape_4d(ctx0, stacked_embeddings, intermediate_embeddings.size() * hidden_size, num_positions + num_padding_patches, num_tiles, batch_size);
+    stacked_embeddings = ggml_unpad(ctx0, stacked_embeddings, 0, num_padding_patches, 0, 0);
+
     embeddings = ggml_reshape_3d(ctx0, embeddings, hidden_size, num_positions + num_padding_patches, num_tiles);
-    embeddings = ggml_view_3d(ctx0, embeddings, hidden_size, num_positions, num_tiles, embeddings->nb[1], embeddings->nb[2], 0);
-
-    intermediate_embd = ggml_reshape_3d(ctx0, intermediate_embd, intermediate_embd->ne[0] * intermediate_embd->ne[1], num_positions + num_padding_patches, num_tiles);
-    intermediate_embd = ggml_view_3d(ctx0, intermediate_embd, intermediate_embd->ne[0], num_positions, num_tiles, intermediate_embd->nb[1], intermediate_embd->nb[2], 0);
-
-    embeddings = ggml_concat(ctx0, embeddings, intermediate_embd, 0);
-    ggml_set_name(embeddings, "cross attention states");
+    embeddings = ggml_unpad(ctx0, embeddings, 0, num_padding_patches, 0, 0);
+    embeddings = ggml_concat(ctx0, embeddings, stacked_embeddings, 0);
 
     // mllama projector
     embeddings = ggml_add(ctx0, ggml_mul_mat(ctx0, model.mm_0_w, embeddings), model.mm_0_b);
@@ -854,16 +848,6 @@ bool mllama_image_batch_encode(mllama_ctx *ctx, const int n_threads, const mllam
             aspect_ratios_data[0] = imgs->data[0].aspect_ratio_id;
             ggml_backend_tensor_set(aspect_ratios, aspect_ratios_data, 0, ggml_nbytes(aspect_ratios));
             free(aspect_ratios_data);
-        }
-    }
-
-    {
-        struct ggml_tensor *intermediate_embeddings = ggml_graph_get_tensor(gf, "intermediate_embeddings");
-        if (intermediate_embeddings != nullptr) {
-            void *zeros = malloc(ggml_nbytes(intermediate_embeddings));
-            memset(zeros, 0, ggml_nbytes(intermediate_embeddings));
-            ggml_backend_tensor_set(intermediate_embeddings, zeros, 0, ggml_nbytes(intermediate_embeddings));
-            free(zeros);
         }
     }
 
