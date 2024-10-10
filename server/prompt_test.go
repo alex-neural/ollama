@@ -217,6 +217,18 @@ func TestChatPrompt(t *testing.T) {
 			},
 		},
 		{
+			name:  "multiple images same prompt",
+			model: visionModel,
+			limit: 2048,
+			msgs: []api.Message{
+				{Role: "user", Content: "Compare these two pictures of hotdogs", Images: []api.ImageData{[]byte("one hotdog"), []byte("two hotdogs")}},
+			},
+			expect: expect{
+				prompt: "[img-0][img-1] Compare these two pictures of hotdogs ",
+				images: [][]byte{[]byte("one hotdog"), []byte("two hotdogs")},
+			},
+		},
+		{
 			name:  "messages with mllama (no images)",
 			model: mllamaModel,
 			limit: 2048,
