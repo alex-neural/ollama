@@ -1,4 +1,4 @@
-From d80c9e35f989b0da0edd0e5ddaf2a87cbf42b009 Mon Sep 17 00:00:00 2001
+From eb77f6e32425e9f18914f3dec66faf4129c30301 Mon Sep 17 00:00:00 2001
 From: Michael Yang <mxyng@pm.me>
 Date: Fri, 11 Oct 2024 16:19:43 -0700
 Subject: [PATCH] add unpad operator
@@ -6,12 +6,12 @@ Subject: [PATCH] add unpad operator
 ---
  ggml/include/ggml.h        | 10 +++++
  ggml/src/ggml-cuda.cu      |  4 ++
- ggml/src/ggml-cuda/pad.cu  | 46 ++++++++++++++++++++
+ ggml/src/ggml-cuda/pad.cu  | 46 +++++++++++++++++++
  ggml/src/ggml-cuda/pad.cuh |  1 +
- ggml/src/ggml-metal.m      | 33 +++++++++++++++
- ggml/src/ggml-metal.metal  | 45 ++++++++++++++++++++
- ggml/src/ggml.c            | 87 +++++++++++++++++++++++++++++++++++++-
- 7 files changed, 224 insertions(+), 2 deletions(-)
+ ggml/src/ggml-metal.m      | 33 ++++++++++++++
+ ggml/src/ggml-metal.metal  | 45 +++++++++++++++++++
+ ggml/src/ggml.c            | 91 +++++++++++++++++++++++++++++++++++++-
+ 7 files changed, 228 insertions(+), 2 deletions(-)
 
 diff --git a/ggml/include/ggml.h b/ggml/include/ggml.h
 index 3fb68036..856937fc 100644
@@ -248,7 +248,7 @@ index f323ab5f..a269fae8 100644
      device        char * dst,
      constant   int64_t & ne0,
 diff --git a/ggml/src/ggml.c b/ggml/src/ggml.c
-index 6e2ebf28..b7599340 100644
+index 6e2ebf28..a7e57120 100644
 --- a/ggml/src/ggml.c
 +++ b/ggml/src/ggml.c
 @@ -2955,7 +2955,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
@@ -372,7 +372,18 @@ index 6e2ebf28..b7599340 100644
          case GGML_OP_ARANGE:
              {
                  ggml_compute_forward_arange(params, tensor);
-@@ -19338,6 +19420,7 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
+@@ -18666,6 +18748,10 @@ static void ggml_compute_backward(struct ggml_context * ctx, struct ggml_tensor
+             {
+                 GGML_ABORT("fatal error"); // TODO: not implemented
+             }
++        case GGML_OP_UNPAD:
++            {
++                GGML_ABORT("fatal error"); // TODO: not implemented
++            }
+         case GGML_OP_ARANGE:
+             {
+                 GGML_ABORT("fatal error"); // TODO: not implemented
+@@ -19338,6 +19424,7 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
              } break;
          case GGML_OP_UPSCALE:
          case GGML_OP_PAD:
