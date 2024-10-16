@@ -37,13 +37,6 @@ func clip(a, a_min, a_max int) int {
 	return a
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func getImageSizeFitToCanvas(imageSize, canvasSize image.Point, tileSize int) image.Point {
 	targetWidth := clip(imageSize.X, tileSize, canvasSize.X)
 	targetHeight := clip(imageSize.Y, tileSize, canvasSize.Y)
