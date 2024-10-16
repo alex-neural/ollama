@@ -47,6 +47,8 @@ import (
 	"github.com/ollama/ollama/version"
 )
 
+var errModelNotFound = errors.New("no safetensors files found")
+
 func CreateHandler(cmd *cobra.Command, args []string) error {
 	filename, _ := cmd.Flags().GetString("file")
 	filename, err := filepath.Abs(filename)
@@ -62,13 +64,23 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 	p := progress.NewProgress(os.Stderr)
 	defer p.Stop()
 
-	f, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+	var mfFound bool
 
-	modelfile, err := parser.ParseFile(f)
+	f, err := os.Open(filename)
+	var reader io.Reader
+	if err != nil {
+		if os.IsNotExist(err) {
+			reader = strings.NewReader("FROM .\n")
+		} else {
+			return err
+		}
+	} else {
+		mfFound = true
+		reader = f
+		defer f.Close()
+	}
+
+	modelfile, err := parser.ParseFile(reader)
 	if err != nil {
 		return err
 	}
@@ -109,7 +121,11 @@ func CreateHandler(cmd *cobra.Command, args []string) error {
 				// TODO make this work w/ adapters
 				tempfile, err := tempZipFiles(path)
 				if err != nil {
-					return err
+					if errors.Is(err, errModelNotFound) && !mfFound {
+						return fmt.Errorf("neither a Modelfile or safetensors files were found")
+					} else {
+						return err
+					}
 				}
 				defer os.RemoveAll(tempfile)
 
@@ -221,7 +237,7 @@ func tempZipFiles(path string) (string, error) {
 		// covers consolidated.x.pth, consolidated.pth
 		files = append(files, pt...)
 	} else {
-		return "", errors.New("no safetensors or torch files found")
+		return "", errModelNotFound
 	}
 
 	// add configuration files, json files are detected as text/plain
