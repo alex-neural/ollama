@@ -7,6 +7,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/ollama/ollama/util/bufioutil"
 )
@@ -18,7 +19,7 @@ type GGML struct {
 
 type model interface {
 	KV() KV
-	Tensors() Tensors
+	Tensors() *Tensors
 }
 
 type KV map[string]any
@@ -124,29 +125,34 @@ func (kv KV) ChatTemplate() string {
 type Tensors struct {
 	Items  []*Tensor
 	Offset uint64
+
+	layers     map[string]Layer
+	layersOnce sync.Once
 }
 
-func (ts Tensors) Layers() map[string]Layer {
-	layers := make(map[string]Layer)
-	for _, t := range ts.Items {
-		parts := strings.Split(t.Name, ".")
-		if index := slices.IndexFunc(parts, func(s string) bool { return s == "blk" || s == "mm" }); index != -1 {
-			if len(parts) > index+2 {
-				// blk and mm should have a number after them, join it
-				parts = append(
-					[]string{strings.Join(parts[:index+2], ".")},
-					parts[index+2:]...)
+func (ts *Tensors) Layers() map[string]Layer {
+	ts.layersOnce.Do(func() {
+		ts.layers = make(map[string]Layer)
+		for _, t := range ts.Items {
+			parts := strings.Split(t.Name, ".")
+			if index := slices.IndexFunc(parts, func(s string) bool { return s == "blk" || s == "mm" }); index != -1 {
+				if len(parts) > index+2 {
+					// blk and mm should have a number after them, join it
+					parts = append(
+						[]string{strings.Join(parts[:index+2], ".")},
+						parts[index+2:]...)
+				}
 			}
+
+			if _, ok := ts.layers[parts[0]]; !ok {
+				ts.layers[parts[0]] = make(Layer)
+			}
+
+			ts.layers[parts[0]][strings.Join(parts[1:], ".")] = t
 		}
+	})
 
-		if _, ok := layers[parts[0]]; !ok {
-			layers[parts[0]] = make(Layer)
-		}
-
-		layers[parts[0]][strings.Join(parts[1:], ".")] = t
-	}
-
-	return layers
+	return ts.layers
 }
 
 type Layer map[string]*Tensor
