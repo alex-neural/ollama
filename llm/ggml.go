@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/ollama/ollama/util/bufioutil"
@@ -129,9 +130,13 @@ func (ts Tensors) Layers() map[string]Layer {
 	layers := make(map[string]Layer)
 	for _, t := range ts.Items {
 		parts := strings.Split(t.Name, ".")
-		if parts[0] == "blk" {
-			// join first and second part, e.g. blk.%d
-			parts = append([]string{fmt.Sprintf("%s.%s", parts[0], parts[1])}, parts[2:]...)
+		if index := slices.IndexFunc(parts, func(s string) bool { return s == "blk" || s == "mm" }); index != -1 {
+			if len(parts) > index+2 {
+				// blk and mm should have a number after them, join it
+				parts = append(
+					[]string{strings.Join(parts[:index+2], ".")},
+					parts[index+2:]...)
+			}
 		}
 
 		if _, ok := layers[parts[0]]; !ok {
