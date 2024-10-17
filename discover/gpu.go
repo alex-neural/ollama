@@ -64,7 +64,8 @@ var (
 )
 
 // With our current CUDA compile flags, older than 5.0 will not work properly
-var CudaComputeMin = [2]C.int{5, 0}
+// var CudaComputeMin = [2]C.int{5, 0}
+var CudaComputeMin = [2]C.int{3, 5}
 
 var RocmComputeMin = 9
 
